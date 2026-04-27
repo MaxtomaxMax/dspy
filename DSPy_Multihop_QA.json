@@ -1,0 +1,504 @@
+[
+  {
+    "question": "In `BootstrapFewShot._prepare_predictor_mappings`, the assertion `len(student.predictors()) == len(teacher.predictors())` depends on recursive predictor discovery. Which lower-level method actually performs the recursion, and what exact `_compiled` condition causes DSPy to stop descending into a submodule during that count?",
+    "answer": "The recursion is ultimately performed by `BaseModule.named_parameters()`, which is reached through `Module.predictors()` -> `Module.named_predictors()`. It stops descending into a submodule when `getattr(submodule, \"_compiled\", False)` is `True`.",
+    "retrieval_path": [
+      "dspy/teleprompt/bootstrap.py -> BootstrapFewShot._prepare_predictor_mappings",
+      "dspy/primitives/module.py -> Module.predictors and Module.named_predictors",
+      "dspy/primitives/base_module.py -> BaseModule.named_parameters compiled-submodule recursion gate"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "When a successful `Predict` call is later converted into a bootstrapped demo by `BootstrapFewShot._bootstrap_one_example`, what exact 3-tuple does `Predict._forward_postprocess` append to `settings.trace`, and how is each tuple transformed into a demo object?",
+    "answer": "`Predict._forward_postprocess` appends `(self, {**kwargs}, pred)` to `settings.trace`. Later, `BootstrapFewShot._bootstrap_one_example` unpacks each step as `predictor, inputs, outputs` and converts it into `dspy.Example(augmented=True, **inputs, **outputs)`.",
+    "retrieval_path": [
+      "dspy/predict/predict.py -> Predict._forward_postprocess trace append",
+      "dspy/teleprompt/bootstrap.py -> BootstrapFewShot._bootstrap_one_example trace iteration",
+      "dspy/teleprompt/bootstrap.py -> bootstrapped demo creation with dspy.Example(augmented=True, **inputs, **outputs)"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "During `BaseModule.load_state(..., allow_unsafe_lm_state=False)`, if a parameter is a `Predict` instance with serialized LM state, which three LM config keys are stripped before reconstruction, and which concrete class is instantiated from the sanitized LM dictionary?",
+    "answer": "The stripped keys are `api_base`, `base_url`, and `model_list`. After sanitization, `Predict.load_state` reconstructs the LM as `dspy.clients.lm.LM(**sanitized_lm_state)`.",
+    "retrieval_path": [
+      "dspy/primitives/base_module.py -> BaseModule.load_state passes allow_unsafe_lm_state only to Predict parameters",
+      "dspy/predict/predict.py -> UNSAFE_LM_STATE_KEYS and _sanitize_lm_state",
+      "dspy/predict/predict.py -> Predict.load_state reconstructs LM from sanitized state",
+      "dspy/clients/lm.py -> LM class definition"
+    ],
+    "hops": 4
+  },
+  {
+    "question": "If `Predict.forward` is using its default adapter and the initial `ChatAdapter` invocation raises an `AdapterParseError`, which adapter class is retried automatically, and which exception class explicitly suppresses that fallback path?",
+    "answer": "`Predict.forward` defaults to `ChatAdapter`, and `ChatAdapter.__call__` retries with `JSONAdapter()`. The fallback is explicitly suppressed for `ContextWindowExceededError`.",
+    "retrieval_path": [
+      "dspy/predict/predict.py -> Predict.forward selects settings.adapter or ChatAdapter()",
+      "dspy/adapters/chat_adapter.py -> ChatAdapter.__call__ fallback logic",
+      "dspy/utils/exceptions.py -> AdapterParseError and ContextWindowExceededError",
+      "dspy/adapters/json_adapter.py -> JSONAdapter retry target"
+    ],
+    "hops": 4
+  },
+  {
+    "question": "When a `dspy.Module` call results in an LM response being logged, which settings key does `Module.__call__` extend before entering `forward`, and which later `BaseLM` method reads that same key to append the history entry into every caller module's `history` list?",
+    "answer": "`Module.__call__` extends the `caller_modules` settings key before invoking `forward`. Later, `BaseLM.update_history` reads `settings.caller_modules` and appends the entry to each module's `history` list.",
+    "retrieval_path": [
+      "dspy/primitives/module.py -> Module.__call__ appends self to caller_modules",
+      "dspy/dsp/utils/settings.py -> DEFAULT_CONFIG and Settings.context for caller_modules",
+      "dspy/clients/base_lm.py -> BaseLM.update_history per-module history propagation"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "In `ChainOfThought.__init__`, which signature transformation inserts the reasoning field, and which lower-level signature method does that transformation delegate to in order to place the field at index 0?",
+    "answer": "`ChainOfThought.__init__` calls `signature.prepend(\"reasoning\", ...)` to insert the reasoning field. `Signature.prepend()` delegates to `Signature.insert(0, ...)` to place that field at the front of the signature.",
+    "retrieval_path": [
+      "dspy/predict/chain_of_thought.py -> ChainOfThought.__init__",
+      "dspy/signatures/signature.py -> Signature.prepend",
+      "dspy/signatures/signature.py -> Signature.insert"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "When `ChainOfThought` is instantiated without a custom `rationale_field`, what default output-field description string is assigned to the inserted reasoning field, and through which predictor class is the extended signature ultimately executed?",
+    "answer": "The default description string is `${reasoning}`. The extended signature is executed through a `dspy.Predict` instance stored on `self.predict`.",
+    "retrieval_path": [
+      "dspy/predict/chain_of_thought.py -> default `desc` and `OutputField` creation",
+      "dspy/predict/chain_of_thought.py -> extended_signature construction",
+      "dspy/predict/chain_of_thought.py -> self.predict = dspy.Predict(...)"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "Inside `ProgramOfThought.forward`, after `_execute_code` returns a result object, which helper class triggers unwrapping of `.output`, and which stdlib function is then used to serialize the final code output before the answer-generation stage?",
+    "answer": "If `_execute_code` receives a `FinalOutput` instance, it unwraps the value via `.output`. The final code output is then serialized with `json.dumps(...)` before being passed into the answer-generation stage.",
+    "retrieval_path": [
+      "dspy/predict/program_of_thought.py -> ProgramOfThought._execute_code",
+      "dspy/primitives/code_interpreter.py -> FinalOutput class",
+      "dspy/predict/program_of_thought.py -> ProgramOfThought.forward updates `code_output`"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "In `ProgramOfThought.forward`, when repeated code regeneration still fails, which exact method is called immediately before the terminal exception is raised, and what is the exact exception type raised at that point?",
+    "answer": "Immediately before the terminal exception, `self.interpreter.shutdown()` is called. The code then raises a `RuntimeError`.",
+    "retrieval_path": [
+      "dspy/predict/program_of_thought.py -> retry loop in ProgramOfThought.forward",
+      "dspy/predict/program_of_thought.py -> terminal failure branch",
+      "dspy/primitives/python_interpreter.py -> interpreter lifecycle / shutdown implementation"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "For `ProgramOfThought`, which two submodules are both instantiated as `dspy.ChainOfThought` over dynamically generated signatures, and which third submodule is responsible for producing the final answer from `final_generated_code` and `code_output`?",
+    "answer": "The dynamically generated `dspy.ChainOfThought` submodules are `self.code_generate` and `self.code_regenerate`. The third `dspy.ChainOfThought` submodule that produces the final answer is `self.generate_output`.",
+    "retrieval_path": [
+      "dspy/predict/program_of_thought.py -> ProgramOfThought.__init__ submodule construction",
+      "dspy/predict/program_of_thought.py -> _generate_signature('generate'/'regenerate')",
+      "dspy/predict/program_of_thought.py -> _generate_signature('answer')"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "In `BestOfN.forward`, how are the rollout IDs computed from the wrapped module's LM, and which two operations are applied to create an isolated per-attempt program before executing it?",
+    "answer": "The rollout IDs are computed as `start + i` for `i` in `range(self.N)`, where `start = lm.kwargs.get('rollout_id', 0)`. For each attempt, DSPy creates an isolated program by deep-copying the module with `self.module.deepcopy()` and then assigning a copied LM via `mod.set_lm(lm.copy(rollout_id=rid, temperature=1.0))`.",
+    "retrieval_path": [
+      "dspy/predict/best_of_n.py -> BestOfN.forward rollout id computation",
+      "dspy/clients/base_lm.py -> BaseLM.copy",
+      "dspy/primitives/module.py -> Module.set_lm"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "After a successful attempt inside `BestOfN.forward`, from which settings key is the attempt-local execution trace copied, and through which later operation is the selected trace merged back into the caller's active trace?",
+    "answer": "The attempt-local trace is copied from `dspy.settings.trace` inside a `with dspy.context(trace=[])` block. After the best attempt is chosen, that trace is merged back into the caller context with `dspy.settings.trace.extend(best_trace)`.",
+    "retrieval_path": [
+      "dspy/predict/best_of_n.py -> temporary trace context and `trace = dspy.settings.trace.copy()`",
+      "dspy/dsp/utils/settings.py -> DEFAULT_CONFIG trace setting / context mechanism",
+      "dspy/predict/best_of_n.py -> final `dspy.settings.trace.extend(best_trace)`"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "In `Refine.forward`, which dynamically created adapter subclass injects module-specific hints on later attempts, and which extra input field name is appended to the signature before calling the underlying adapter?",
+    "answer": "`Refine.forward` creates a dynamic `WrapperAdapter` subclass to inject module-specific hints. It appends an extra input field named `hint_` to the signature before delegating to the underlying adapter.",
+    "retrieval_path": [
+      "dspy/predict/refine.py -> `if not advice` / `else` branch with `WrapperAdapter`",
+      "dspy/predict/refine.py -> `inputs['hint_'] = ...`",
+      "dspy/predict/refine.py -> `signature.append('hint_', InputField(...))`"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "When `Refine` generates cross-module advice after a failed threshold check, which signature class defines the output field carrying the advice map, and through which module constructor is that advice-generating call executed?",
+    "answer": "The advice map is defined by the `OfferFeedback` signature class, whose `advice` field has type `dict[str, str]`. The advice-generating call is executed through `dspy.Predict(OfferFeedback)`.",
+    "retrieval_path": [
+      "dspy/predict/refine.py -> OfferFeedback signature definition",
+      "dspy/predict/refine.py -> `advice = dspy.Predict(OfferFeedback)(**advise_kwargs).advice`",
+      "dspy/predict/predict.py -> Predict class"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "Before `Refine` serializes the failed trajectory and reward payload for the advice model, which helper function replaces non-serializable objects, and which JSON library function is then used to encode those sanitized structures?",
+    "answer": "`Refine` first sanitizes non-serializable values with `recursive_mask(...)`. It then serializes those sanitized structures with `orjson.dumps(...).decode()`.",
+    "retrieval_path": [
+      "dspy/predict/refine.py -> `recursive_mask` helper",
+      "dspy/predict/refine.py -> construction of `advise_kwargs`",
+      "dspy/predict/refine.py -> `orjson.dumps(...).decode()`"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "In `Refine.inspect_modules`, which utility function formats the input and output field descriptions for each predictor, and from which object are the predictor instructions read before being textwrapped into the module summary?",
+    "answer": "`inspect_modules` uses `get_field_description_string(...)` to format the predictor input and output field descriptions. The predictor instructions are read from `predictor.signature.instructions` before being normalized with `textwrap.dedent(...)`.",
+    "retrieval_path": [
+      "dspy/predict/refine.py -> `inspect_modules` helper",
+      "dspy/adapters/utils.py / import usage -> `get_field_description_string` call site in Refine",
+      "dspy/signatures/signature.py -> `instructions` property on Signature classes"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "When `Parallel.forward` receives an input example that is a `dspy.Example`, which branch decides whether to call `module(**example.inputs())` or `module(example)`, and which separate batching helper in `Module.batch` pre-converts each example into `example.inputs()` before constructing execution pairs?",
+    "answer": "Inside `Parallel.forward`, the `if isinstance(example, Example)` branch checks `self.access_examples`; when `True`, it calls `module(**example.inputs())`, otherwise it calls `module(example)`. Separately, `Module.batch` pre-converts each example by building execution pairs as `(self, example.inputs())` before handing them to `Parallel`.",
+    "retrieval_path": [
+      "dspy/predict/parallel.py -> `Parallel.forward` example dispatch logic",
+      "dspy/primitives/example.py -> Example.inputs() usage context",
+      "dspy/primitives/module.py -> Module.batch execution-pair construction"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "In `ParallelExecutor.execute`, what condition causes DSPy to bypass the threaded path and use `_execute_sequential` instead, and which earlier wrapper still ensures user-function exceptions are converted into logged outcomes rather than escaping directly?",
+    "answer": "DSPy uses `_execute_sequential` when `self.num_threads == 1`. Even in that case, the user function is first wrapped by `_wrap_function(...)`, which catches exceptions, logs them, increments error counts, and returns the exception object as an outcome.",
+    "retrieval_path": [
+      "dspy/utils/parallelizer.py -> ParallelExecutor.execute",
+      "dspy/utils/parallelizer.py -> `_wrap_function`",
+      "dspy/utils/parallelizer.py -> `_execute_sequential`"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "In the threaded execution path of `ParallelExecutor`, which context variable is copied from the parent thread into each worker, and what special handling is applied to that copied state when it contains a `usage_tracker`?",
+    "answer": "The worker threads receive a copy of `thread_local_overrides` from the parent thread. If that copied state contains a `usage_tracker`, DSPy deep-copies the tracker so each worker thread tracks usage independently.",
+    "retrieval_path": [
+      "dspy/utils/parallelizer.py -> parent_overrides capture in `_execute_parallel`",
+      "dspy/dsp/utils/settings.py -> `thread_local_overrides` context variable",
+      "dspy/utils/parallelizer.py -> worker-side deep copy of `usage_tracker`"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "When `ParallelExecutor` decides a task is a straggler, what two numeric settings control whether it may be resubmitted, and which data structure prevents the same original future from being resubmitted more than once?",
+    "answer": "Straggler resubmission is controlled by `timeout` and `straggler_limit`. The executor uses the `resubmitted` set to ensure the same original future is not resubmitted more than once.",
+    "retrieval_path": [
+      "dspy/utils/parallelizer.py -> constructor arguments `timeout` and `straggler_limit`",
+      "dspy/utils/parallelizer.py -> `_execute_parallel` straggler check",
+      "dspy/utils/parallelizer.py -> `resubmitted` set"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "In `asyncify`, which DSPy settings value determines the limiter capacity for offloaded worker calls, and which context variable is captured at call time and restored inside the wrapped synchronous program?",
+    "answer": "The limiter capacity is determined by `dspy.settings.async_max_workers`. The context variable captured at call time and restored inside the wrapped program is `thread_local_overrides`.",
+    "retrieval_path": [
+      "dspy/utils/asyncify.py -> `get_async_max_workers()` / `get_limiter()`",
+      "dspy/dsp/utils/settings.py -> `async_max_workers` default setting",
+      "dspy/utils/asyncify.py -> capture and restore of `thread_local_overrides`"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "If an async function is wrapped in `dspy.Tool` and then invoked synchronously via `tool(...)`, which DSPy setting gate allows that conversion, and which helper method decides whether to call `asyncio.run(...)` or `loop.run_until_complete(...)`?",
+    "answer": "The conversion is gated by `dspy.settings.allow_tool_async_sync_conversion`. The helper method that decides between `asyncio.run(...)` and `loop.run_until_complete(...)` is `Tool._run_async_in_sync(...)`.",
+    "retrieval_path": [
+      "dspy/adapters/types/tool.py -> `Tool.__call__` async-tool branch",
+      "dspy/dsp/utils/settings.py -> `allow_tool_async_sync_conversion` default setting",
+      "dspy/adapters/types/tool.py -> `_run_async_in_sync`"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "When `Adapter._call_preprocess` enables native function calling, which input-field annotation must exist to supply tools, and what two signature deletions are performed before the LM is called if both tool input and `ToolCalls` output are present?",
+    "answer": "The tool-supplying input field must be annotated as `list[dspy.Tool]` or `dspy.Tool`. If both that input and a `ToolCalls` output field are present, DSPy deletes the tool-call output field and the tool input field from the signature before calling the LM.",
+    "retrieval_path": [
+      "dspy/adapters/base.py -> `_get_tool_call_input_field_name`",
+      "dspy/adapters/base.py -> `_get_tool_call_output_field_name`",
+      "dspy/adapters/base.py -> `_call_preprocess` signature deletion logic"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "After an LM returns native tool calls, which adapter postprocessing step converts each provider tool call into `{name, args}` dictionaries, and which typed container class wraps the final parsed list?",
+    "answer": "`Adapter._call_postprocess` converts each native provider tool call into a dictionary with `name` and `args` keys by reading `v['function']['name']` and JSON-repairing `v['function']['arguments']`. The final parsed list is wrapped in `ToolCalls.from_dict_list(...)`.",
+    "retrieval_path": [
+      "dspy/adapters/base.py -> `_call_postprocess` tool call conversion",
+      "dspy/adapters/types/tool.py -> `ToolCalls.from_dict_list`",
+      "dspy/adapters/types/tool.py -> `ToolCalls` class"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "When a signature contains a `History` input field, which adapter method removes that field from the active inputs after formatting the prior turns, and which higher-level formatter decides to call that method before assembling the current user message?",
+    "answer": "`Adapter.format_conversation_history(...)` removes the history field from `inputs` after formatting the prior turns. The higher-level method that decides to call it first is `Adapter.format(...)`.",
+    "retrieval_path": [
+      "dspy/adapters/base.py -> `_get_history_field_name`",
+      "dspy/adapters/base.py -> `format_conversation_history`",
+      "dspy/adapters/base.py -> `format`"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "If a `JSONAdapter` is used with a model that supports `response_format`, but the output signature contains an open-ended mapping such as `dict[str, Any]`, what response format does DSPy force instead, and which helper detects that unsupported mapping type?",
+    "answer": "DSPy forces `lm_kwargs['response_format'] = {'type': 'json_object'}` instead of a structured schema. The unsupported mapping type is detected by `_has_open_ended_mapping(...)`.",
+    "retrieval_path": [
+      "dspy/adapters/json_adapter.py -> `_has_open_ended_mapping`",
+      "dspy/adapters/json_adapter.py -> `_json_adapter_call_common`",
+      "dspy/adapters/json_adapter.py -> fallback `response_format` assignment"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "When `JSONAdapter` does attempt Structured Outputs, which helper builds the Pydantic response model from signature output fields, and what exact extra-field policy is imposed on that model before the JSON schema is finalized?",
+    "answer": "`JSONAdapter` uses `_get_structured_outputs_response_format(...)` to build the Pydantic response model from the signature output fields. That helper creates the model with `pydantic.ConfigDict(extra='forbid')`, so extra fields are forbidden before schema finalization.",
+    "retrieval_path": [
+      "dspy/adapters/json_adapter.py -> `JSONAdapter.__call__` structured-output branch",
+      "dspy/adapters/json_adapter.py -> `_get_structured_outputs_response_format`",
+      "dspy/adapters/json_adapter.py -> `pydantic.create_model(..., __config__=pydantic.ConfigDict(extra='forbid'))`"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "During schema postprocessing for Structured Outputs, which two object-schema constraints are recursively enforced on every nested object, and which method override causes the generated Pydantic model to return that precomputed schema afterward?",
+    "answer": "For every nested object schema, DSPy recursively enforces a `required` list containing all property names and sets `additionalProperties` to `False`. Afterward, it overrides `pydantic_model.model_json_schema` with a lambda that returns the precomputed schema.",
+    "retrieval_path": [
+      "dspy/adapters/json_adapter.py -> `enforce_required` helper",
+      "dspy/adapters/json_adapter.py -> recursive handling of `$defs` / arrays / objects",
+      "dspy/adapters/json_adapter.py -> `pydantic_model.model_json_schema = lambda ...: schema`"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "In `TwoStepAdapter.parse`, what synthetic extractor signature is built for the second-stage parse, and which adapter class is hard-coded to run that extraction over the raw first-stage completion?",
+    "answer": "`TwoStepAdapter.parse` builds an extractor signature of the form `text -> {original output fields}` by creating a synthetic signature with a `text` input plus the original output fields. It hard-codes `ChatAdapter` to run the extraction over the raw first-stage completion.",
+    "retrieval_path": [
+      "dspy/adapters/two_step_adapter.py -> `_create_extractor_signature`",
+      "dspy/adapters/two_step_adapter.py -> `parse`",
+      "dspy/adapters/chat_adapter.py -> ChatAdapter class used as second-stage extractor"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "If a `TwoStepAdapter` asynchronous call receives native tool calls from the first-stage LM, which output field type must exist in the original signature to preserve them, and through which container constructor are those parsed tool calls attached to the extracted value?",
+    "answer": "The original signature must contain an output field annotated as `ToolCalls` to preserve native tool calls. Those parsed tool calls are attached to the extracted value via `ToolCalls.from_dict_list(...)`.",
+    "retrieval_path": [
+      "dspy/adapters/two_step_adapter.py -> `acall` tool-call preservation branch",
+      "dspy/adapters/base.py -> `_get_tool_call_output_field_name` semantics",
+      "dspy/adapters/types/tool.py -> `ToolCalls.from_dict_list`"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "When `Tool._parse_function` encounters a parameter annotated with a Pydantic `BaseModel`, which helper expands any `$ref` references in that model's JSON schema, and which stored attribute ultimately holds the generated per-argument schemas for later validation?",
+    "answer": "`Tool._parse_function` expands `$ref` references with `_resolve_json_schema_reference(...)`. The generated per-argument schemas are ultimately stored on `self.args`.",
+    "retrieval_path": [
+      "dspy/adapters/types/tool.py -> `Tool._parse_function`",
+      "dspy/adapters/types/tool.py -> `_resolve_json_schema_reference`",
+      "dspy/adapters/types/tool.py -> assignment to `self.args`"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "Before `Tool.__call__` invokes the wrapped Python function, which validation library checks each provided argument value against the tool's JSON schema, and which later Pydantic utility is used to coerce validated values back into their declared Python types?",
+    "answer": "`Tool._validate_and_parse_args` uses `jsonschema.validate(...)` to check each provided value against the stored argument schema. It then uses `pydantic.create_model(...)` plus `model_validate(...)` to coerce validated values back into their declared Python types.",
+    "retrieval_path": [
+      "dspy/adapters/types/tool.py -> `_validate_and_parse_args` schema validation",
+      "dspy/adapters/types/tool.py -> `jsonschema.validate` import usage",
+      "dspy/adapters/types/tool.py -> Pydantic wrapper model coercion"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "If `ToolCalls.ToolCall.execute()` is invoked without an explicit function registry, which stack frame does it inspect to find candidate functions, and what wrapper exception type is raised if the target function runs but throws an internal exception?",
+    "answer": "Without an explicit registry, it inspects the immediate caller frame via `inspect.currentframe().f_back` and checks that frame's locals and globals. If the located target function throws an exception, `ToolCall.execute()` wraps it in a `RuntimeError`.",
+    "retrieval_path": [
+      "dspy/adapters/types/tool.py -> `ToolCalls.ToolCall.execute` automatic lookup branch",
+      "dspy/adapters/types/tool.py -> caller locals/globals inspection",
+      "dspy/adapters/types/tool.py -> wrapped `RuntimeError` on execution failure"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "In `streamify`, when listeners are provided for particular predictor fields, which helper maps predictor IDs to listeners before execution starts, and what later condition causes DSPy to emit the final `Prediction` even if `include_final_prediction_in_output_stream=False`?",
+    "answer": "Before execution starts, `streamify` builds the mapping with `find_predictor_for_stream_listeners(...)`. Later, DSPy still emits the final `Prediction` if there are no listeners, if any listener saw a cache hit, or if no listener ever observed a stream start.",
+    "retrieval_path": [
+      "dspy/streaming/streamify.py -> listener setup in `streamify`",
+      "dspy/streaming/streaming_listener.py -> `find_predictor_for_stream_listeners`",
+      "dspy/streaming/streamify.py -> final `Prediction` emission logic"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "When `streamify` wraps a synchronous DSPy program, which helper is used to make the program awaitable, and which settings keys are injected into the execution context so status messages and token listeners can receive side-channel events?",
+    "answer": "When the program is synchronous, `streamify` wraps it with `asyncify(...)`. During execution it injects at least `send_stream`, `callbacks`, and `stream_listeners` into `dspy.settings.context(...)` so status and token-stream side channels can work.",
+    "retrieval_path": [
+      "dspy/streaming/streamify.py -> sync-program wrapping branch",
+      "dspy/utils/asyncify.py -> asyncify helper",
+      "dspy/streaming/streamify.py -> `with settings.context(send_stream=..., callbacks=..., stream_listeners=...)`"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "In sync streaming mode, which helper converts the async generator into a synchronous generator, and which context-propagation primitive is copied before the background producer thread starts consuming the async stream?",
+    "answer": "`apply_sync_streaming(...)` converts the async generator into a synchronous generator. Before the background producer thread starts, it copies the current context with `contextvars.copy_context()`.",
+    "retrieval_path": [
+      "dspy/streaming/streamify.py -> `async_streaming=False` branch",
+      "dspy/streaming/streamify.py -> `apply_sync_streaming`",
+      "dspy/streaming/streamify.py -> `contextvars.copy_context()`"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "If two predictors in one program both expose an output field named `answer`, which helper raises the ambiguity error during automatic stream-listener binding, and what two listener attributes must be set explicitly to disambiguate them according to the streaming docs?",
+    "answer": "The ambiguity error is raised by `find_predictor_for_stream_listeners(...)`. To disambiguate duplicate field names, the listener must explicitly set both `predict` and `predict_name`.",
+    "retrieval_path": [
+      "dspy/streaming/streaming_listener.py -> `find_predictor_for_stream_listeners` duplicate-field check",
+      "docs/docs/tutorials/streaming/index.md -> duplicate field-name guidance",
+      "dspy/streaming/streaming_listener.py -> StreamListener constructor fields"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "According to the streaming implementation and tutorial, why does DSPy need `allow_reuse=True` to stream the same field multiple times in a loop such as `dspy.ReAct`, and which internal listener state is reset when a reused listener begins a new stream after `stream_end` was already reached?",
+    "answer": "DSPy needs `allow_reuse=True` because a `StreamListener` normally closes itself after one completed streaming session, which is why repeated fields in looped modules like `dspy.ReAct` would otherwise only stream once. When reuse is enabled and a new stream begins after `stream_end`, the listener resets state including `stream_end`, `cache_hit`, `field_start_queue`, `field_end_queue`, `json_adapter_state['field_accumulated_messages']`, and `stream_start`.",
+    "retrieval_path": [
+      "docs/docs/tutorials/streaming/index.md -> explanation of `allow_reuse=True` for ReAct",
+      "dspy/streaming/streaming_listener.py -> `if self.stream_end:` reuse reset branch",
+      "dspy/streaming/streaming_listener.py -> listener state fields"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "Which callback class is automatically appended by `streamify` to generate status updates, and which two special tool outputs cause that callback to suppress status messages for ReAct's built-in finishing step?",
+    "answer": "`streamify` automatically appends `StatusStreamingCallback` if one is not already present. That callback suppresses tool status messages when the tool instance name is `finish` on tool start, and when the tool output equals `Completed.` on tool end.",
+    "retrieval_path": [
+      "dspy/streaming/streamify.py -> automatic callback injection",
+      "dspy/streaming/messages.py -> `StatusStreamingCallback.on_tool_start`",
+      "dspy/streaming/messages.py -> `StatusStreamingCallback.on_tool_end`"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "When `Module.__call__` has usage tracking enabled and no tracker is already present in thread-local overrides, which context manager is used to collect token usage, and through which helper does the resulting usage map get attached back onto a returned `Prediction`?",
+    "answer": "`Module.__call__` uses the `track_usage()` context manager to collect token usage. The resulting usage map is attached back onto the returned `Prediction` via `Module._set_lm_usage(...)`.",
+    "retrieval_path": [
+      "dspy/primitives/module.py -> `Module.__call__` usage-tracking branch",
+      "dspy/utils/usage_tracker.py -> `track_usage` context manager",
+      "dspy/primitives/module.py -> `_set_lm_usage`"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "If a module returns a tuple instead of a bare `Prediction`, what exact tuple shape still allows DSPy to attach LM usage automatically, and which comment in the implementation names the optimizer scenario that motivated this special case?",
+    "answer": "DSPy still attaches LM usage when the module returns a tuple whose first element is a `Prediction`. The implementation comment names the motivating scenario as `GEPA bootstrap tracing`.",
+    "retrieval_path": [
+      "dspy/primitives/module.py -> `_set_lm_usage` tuple handling",
+      "dspy/primitives/prediction.py -> `Prediction` class",
+      "dspy/primitives/module.py -> inline comment naming GEPA bootstrap tracing"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "In DSPy's callback system, which context variable tracks the currently active callback call ID across nested operations, and which helper combines globally configured callbacks with per-instance callbacks before dispatching start/end handlers?",
+    "answer": "The currently active callback call ID is tracked in the `ACTIVE_CALL_ID` context variable. The helper that combines globally configured callbacks with per-instance callbacks is `_get_active_callbacks(...)` inside `with_callbacks`.",
+    "retrieval_path": [
+      "dspy/utils/callback.py -> `ACTIVE_CALL_ID`",
+      "dspy/utils/callback.py -> `with_callbacks` decorator",
+      "dspy/utils/callback.py -> `_get_active_callbacks`"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "When whole-program saving is requested with `save_program=True`, which two files are written into the target directory, and which separate loading function later requires `allow_pickle=True` before it will deserialize that saved program?",
+    "answer": "Whole-program saving writes `program.pkl` and `metadata.json` into the target directory. The separate loading function that later requires `allow_pickle=True` is `dspy.utils.saving.load(...)` (exposed as `dspy.load`).",
+    "retrieval_path": [
+      "dspy/primitives/base_module.py -> `save(..., save_program=True)` file writes",
+      "dspy/utils/saving.py -> `load(path, allow_pickle=False)`",
+      "docs/docs/tutorials/saving/index.md -> whole-program saving/loading workflow"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "During state-only loading from a `.json` or `.pkl` file, where does DSPy read the saved dependency-version metadata from before warning on mismatches, and which helper is used to compute the current environment's dependency versions for comparison?",
+    "answer": "During state-only loading, DSPy reads saved dependency-version metadata from `state['metadata']['dependency_versions']`. It computes the current environment versions with `get_dependency_versions()`.",
+    "retrieval_path": [
+      "dspy/primitives/base_module.py -> `BaseModule.load` metadata comparison",
+      "dspy/utils/saving.py -> `get_dependency_versions()`",
+      "docs/docs/tutorials/saving/index.md -> backward-compatibility warning context"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "If DSPy is configured with cache restriction enabled, which disk-cache constructor hook swaps in the restricted deserializer, and what does `Cache.get(...)` do to a disk entry when that deserializer raises `DeserializationError`?",
+    "answer": "When cache restriction is enabled, the disk cache constructor passes `disk=restricted_disk(allowed)` into `FanoutCache`. If that restricted deserializer raises `DeserializationError`, `Cache.get(...)` deletes the disk entry and returns `None`.",
+    "retrieval_path": [
+      "dspy/clients/cache.py -> `Cache.__init__` restricted pickle branch",
+      "dspy/clients/cache.py -> `Cache.get` deserialization-error handling",
+      "docs/docs/tutorials/cache/index.md -> restrict-pickle behavior"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "Before hashing a request into a DSPy cache key, how are callable values normalized, and what extra synthetic request field is injected by `request_cache` so two different wrapped functions with identical kwargs do not collide?",
+    "answer": "Callable values are normalized by `_transform_value(...)`, which tries to turn them into a string containing their source code and otherwise falls back to a callable-name placeholder. `request_cache` also injects a synthetic `_fn_identifier` field containing the wrapped function's fully qualified name.",
+    "retrieval_path": [
+      "dspy/clients/cache.py -> `_transform_value` callable branch",
+      "dspy/clients/cache.py -> `request_cache.process_request`",
+      "dspy/clients/cache.py -> `_fn_identifier` injection"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "When an LM cache hit is returned from DSPy's cache, which response attributes are modified to reflect that no new provider call was made, and which tutorial section explicitly notes the user-visible consequence for usage tracking?",
+    "answer": "On a cache hit, `_prepare_cached_response(...)` clears `response.usage` to `{}` and sets `response.cache_hit = True`. The cache tutorial explicitly notes that when usage tracking is enabled, the usage metrics for a cached call will be empty/`None`-equivalent rather than reflecting a fresh LM call.",
+    "retrieval_path": [
+      "dspy/clients/cache.py -> `_prepare_cached_response`",
+      "dspy/clients/base_lm.py -> cached responses are still processed through LM history path",
+      "docs/docs/tutorials/cache/index.md -> cache-hit usage note"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "In `Embedder.__call__`, which cached helper is selected when `caching=True`, and which lower-level embedding routine decides whether to invoke `litellm.embedding(...)` or a user-supplied callable based on the type of `model`?",
+    "answer": "When `caching=True`, `Embedder.__call__` selects `_cached_compute_embeddings`. The lower-level routine that decides whether to call `litellm.embedding(...)` or a user-supplied callable is `_compute_embeddings(...)`.",
+    "retrieval_path": [
+      "dspy/clients/embedding.py -> `Embedder.__call__`",
+      "dspy/clients/embedding.py -> `_cached_compute_embeddings`",
+      "dspy/clients/embedding.py -> `_compute_embeddings`"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "In the embeddings retriever, which helper turns a batched retrieval function into a single-query callable stored on `self.search_fn`, and which subclass extends the base retriever specifically by adding similarity scores to the returned `Prediction`?",
+    "answer": "The helper is `Unbatchify(self._batch_forward)`, which becomes `self.search_fn`. The subclass that extends the base retriever by adding similarity scores is `EmbeddingsWithScores`.",
+    "retrieval_path": [
+      "dspy/retrievers/embeddings.py -> `self.search_fn = Unbatchify(self._batch_forward)`",
+      "dspy/utils/unbatchify.py -> `Unbatchify` class",
+      "dspy/retrievers/embeddings.py -> `EmbeddingsWithScores.forward`"
+    ],
+    "hops": 3
+  },
+  {
+    "question": "When `Embeddings` is loaded from disk using `from_saved`, which constructor path is intentionally bypassed to avoid recomputing corpus embeddings, and which piece of search infrastructure is reinitialized manually before `load(...)` is called?",
+    "answer": "`Embeddings.from_saved(...)` bypasses the normal `__init__` constructor path by creating the instance with `cls.__new__(cls)`, so it does not recompute corpus embeddings. Before calling `load(...)`, it manually reinitializes `search_fn` as `Unbatchify(instance._batch_forward)`.",
+    "retrieval_path": [
+      "dspy/retrievers/embeddings.py -> `Embeddings.from_saved`",
+      "dspy/retrievers/embeddings.py -> bypass via `cls.__new__(cls)`",
+      "dspy/utils/unbatchify.py -> `Unbatchify` role"
+    ],
+    "hops": 3
+  }
+]
